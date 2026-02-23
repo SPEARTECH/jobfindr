@@ -1,0 +1,17 @@
+dist/
+venv/
+__pycache__/
+# Ignore Go build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+# Ignore Python build artifacts
+*.pyc
+*.pyo
+*.pyd
+# Ignore log files
+*.log
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
