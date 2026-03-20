@@ -7,6 +7,8 @@ import (
 	"html"
 	"io"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,20 +53,37 @@ func main() {
 	ctx, cancel := chromedp.NewContext(allocCtx)
 	defer cancel()
 
-	// open LinkedIn login page
+	// // open LinkedIn login page
+	// if err := chromedp.Run(ctx, chromedp.Navigate("https://www.linkedin.com/login")); err != nil {
+	// 	fmt.Println("navigate error:", err)
+	// 	return
+	// }
+
+	// fmt.Println("Browser opened. Log in to LinkedIn in the browser window, then press Enter here to continue.")
+	// bufio.NewReader(os.Stdin).ReadBytes('\n')
+
+	// prompt user before opening browser
+	fmt.Println("Press Enter to open a browser window so you can log in to LinkedIn...")
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
+	// time.Sleep(fetchDelay) // optional small pause before opening
+
+	// open LinkedIn login page after user confirmation
 	if err := chromedp.Run(ctx, chromedp.Navigate("https://www.linkedin.com/login")); err != nil {
 		fmt.Println("navigate error:", err)
 		return
 	}
-    
+
 	fmt.Println("Browser opened. Log in to LinkedIn in the browser window, then press Enter here to continue.")
 	bufio.NewReader(os.Stdin).ReadBytes('\n')
-    
+
 	// go to saved jobs and grab HTML
 	var savedHTML string
-	target := "https://www.linkedin.com/my-items/saved-jobs/?cardType=SAVED"
+	target1 := "https://www.linkedin.com/my-items/"
 	if err := chromedp.Run(ctx,
-		chromedp.Navigate(target),
+		chromedp.Navigate(target1),
+		chromedp.Sleep(2*time.Second),
+		chromedp.WaitVisible("body", chromedp.ByQuery),
+		chromedp.Click(`#search-reusables__filters-bar > ul > li:nth-child(1) > button`, chromedp.BySearch),
 		chromedp.Sleep(2*time.Second),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.OuterHTML("html", &savedHTML, chromedp.ByQuery),
@@ -78,19 +97,38 @@ func main() {
 	df := ReadHTML(savedHTML)
 	df = df.Filter(Col("tag").Eq("ul"))
 	df = df.Column("pages_total", Col("inner_html_str").ExtractHTML("span").Index(9))
+	// df.DisplayBrowser()
 	var pages_total int
 	vals := df.Filter(Col("depth").Eq(10)).Collect("pages_total")
+	// fmt.Printf("vals: %v", vals)
 	if len(vals) == 0 {
 		fmt.Println("no pages_total rows found; dumping sample df for debugging:")
 		df.Vertical(10, 100)
 	} else {
-		if s, ok := vals[len(vals)-1].(string); ok {
-			fmt.Sscanf(s, "%d", &pages_total)
+		maxJobs := 0
+		re := regexp.MustCompile(`\d+`)
+
+		for _, v := range vals {
+			if s, ok := v.(string); ok {
+				numStr := re.FindString(s)
+				if numStr != "" {
+					num, err := strconv.Atoi(numStr)
+					if err == nil && num > maxJobs {
+						maxJobs = num
+					}
+				}
+			}
 		}
+		// jobsPerPage := 9
+		// fmt.Printf("maxJobs: %d\n", maxJobs)
+		// fmt.Printf("jobsPerPage: %d\n", jobsPerPage)
+		pages_total = maxJobs
+		// fmt.Printf("Calculated pages_total: %d\n", pages_total)
 	}
+	// df.DisplayBrowser()
+	// pages_total = pages_total + 1 // adjust for zero-indexing
 	// test
 	// pages_total = 1 // for testing, comment out when done
-
 	df = df.Filter(Col("depth").Eq(11))
 
 	df = ReadHTMLTop(df.Collect("inner_html_str")[0].(string))
@@ -126,22 +164,25 @@ func main() {
 	fmt.Printf("Navigating to page %d/%d...\n", 1, pages_total)
 
 	// determine items per page from the first page
-	pageSize := len(df.Collect("link"))
+	// pageSize := len(df.Collect("link"))
 
 	// fetch remaining pages synchronously, one-by-one, and union them
+	// fmt.Printf("Pages_total: %d", pages_total)
 	for p := 2; p <= pages_total; p++ {
 		fmt.Printf("Navigating to page %d/%d...\n", p, pages_total)
-		start := (p - 1) * pageSize
-		pageURL := fmt.Sprintf("%s&start=%d", target, start)
+		// start := (p - 1) * pageSize
+		// pageURL := fmt.Sprintf("%s&start=%d", target3, start)
 
 		var pageHTML string
 		if err := chromedp.Run(ctx,
-			chromedp.Navigate(pageURL),
+			// chromedp.Navigate(pageURL),
+			chromedp.Click(`button[aria-label="Next"]`, chromedp.NodeVisible),
+
 			chromedp.Sleep(1*time.Second),
 			chromedp.WaitVisible("body", chromedp.ByQuery),
 			chromedp.OuterHTML("html", &pageHTML, chromedp.ByQuery),
 		); err != nil {
-			fmt.Println("navigate error:", err, "url:", pageURL)
+			fmt.Println("navigate error:", err, "Next Click...")
 			break
 		}
 
@@ -249,5 +290,5 @@ func main() {
 
 	// df.Count()
 	df.DisplayBrowser()
-	// df.Vertical(100, 100)
+	// // df.Vertical(100, 100)
 }
